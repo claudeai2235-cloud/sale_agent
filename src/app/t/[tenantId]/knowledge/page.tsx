@@ -33,7 +33,7 @@ export default async function KnowledgePage({ params }: PageProps<"/t/[tenantId]
             {fs.map((f) => (
               <details key={f.id} className="rounded-lg border border-line p-3">
                 <summary className="cursor-pointer text-sm font-medium">
-                  {f.question} {f.source === "learned" && <Badge tone="purple">AI သင်ယူ</Badge>}
+                  {f.question} {f.source === "learned" && <Badge tone="purple">AI သင်ယူ</Badge>} {f.source === "ai" && <Badge tone="blue">🪄 AI ဖြည့်</Badge>}
                 </summary>
                 <ActionForm action={saveFaq} className="mt-3 space-y-2">
                   {hid}
@@ -70,7 +70,7 @@ export default async function KnowledgePage({ params }: PageProps<"/t/[tenantId]
             {os.map((o) => (
               <details key={o.id} className="rounded-lg border border-line p-3">
                 <summary className="cursor-pointer text-sm font-medium">
-                  {o.objection} {o.source === "learned" && <Badge tone="purple">AI သင်ယူ</Badge>}
+                  {o.objection} {o.source === "learned" && <Badge tone="purple">AI သင်ယူ</Badge>} {o.source === "ai" && <Badge tone="blue">🪄 AI ဖြည့်</Badge>}
                 </summary>
                 <ActionForm action={saveObjection} className="mt-3 space-y-2">
                   {hid}

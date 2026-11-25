@@ -28,6 +28,7 @@ export default async function Overview({ params }: PageProps<"/t/[tenantId]">) {
   const b = `/t/${tenantId}`;
 
   const checklist = [
+    { done: !!s.autofill, label: "🪄 လုပ်ငန်းအကြောင်း ရေး/ပြောပြီး AI ကို အကုန်ဖြည့်ခိုင်းရန် (အမြန်ဆုံးနည်း)", href: `${b}/autofill` },
     { done: comp.importantMissing.length === 0, label: `လုပ်ငန်းအချက်အလက် ဖြည့်ရန် (${comp.percent}%)`, href: `${b}/setup` },
     { done: np > 0, label: "ပစ္စည်း/Course အနည်းဆုံး ၁ ခု ထည့်ရန်", href: `${b}/products` },
     { done: npm > 0, label: "ငွေပေးချေမှု နည်းလမ်း ထည့်ရန်", href: `${b}/payments` },

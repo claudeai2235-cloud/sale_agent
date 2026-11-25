@@ -46,6 +46,8 @@ type GenArgs = {
   temperature?: number;
   /** Lower thinking = faster & cheaper replies. "default" lets the model decide. */
   thinkingLevel?: "default" | "low" | "medium" | "high";
+  /** Enable Google Search grounding (text output only — not combined with a JSON schema). */
+  googleSearch?: boolean;
 };
 
 /** Calls Gemini; returns parsed JSON when a schema is given, otherwise text. Falls back to a second model on failure. */
@@ -79,6 +81,7 @@ async function callOnce<T>(args: GenArgs, model: string, thinking: boolean): Pro
       temperature: args.temperature ?? 0.7,
       ...(thinking ? { thinkingConfig: { thinkingLevel: args.thinkingLevel!.toUpperCase() as ThinkingLevel } } : {}),
       ...(args.schema ? { responseMimeType: "application/json", responseJsonSchema: args.schema } : {}),
+      ...(args.googleSearch && !args.schema ? { tools: [{ googleSearch: {} }] } : {}),
     },
   });
   const u = res.usageMetadata;

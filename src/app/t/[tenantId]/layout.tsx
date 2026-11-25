@@ -22,6 +22,7 @@ export default async function TenantLayout({ children, params }: LayoutProps<"/t
     { href: b, label: "ပင်မ", icon: "🏠" },
     { href: `${b}/inbox`, label: "စကားဝိုင်းများ", icon: "💬", badge: inbox },
     { href: `${b}/orders`, label: "Order များ", icon: "🧾", badge: ord },
+    { href: `${b}/autofill`, label: "AI နဲ့ အလိုအလျောက်ဖြည့်", icon: "🪄" },
     { href: `${b}/setup`, label: "လုပ်ငန်းအချက်အလက်", icon: "📋" },
     { href: `${b}/products`, label: "ပစ္စည်း / ဝန်ဆောင်မှု", icon: "📦" },
     { href: `${b}/knowledge`, label: "FAQ & Objection", icon: "💡" },

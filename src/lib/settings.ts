@@ -66,6 +66,16 @@ export type TenantSettings = {
   };
   learning: { enabled: boolean; autoApprove: boolean };
   messenger: { humanAgentTag: boolean };
+  /** Result of the last AI business-setup run (what was auto-filled, what the owner must still add). */
+  autofill?: {
+    at: string;
+    filledKeys: string[];
+    addedProducts: string[];
+    addedFaqs: number;
+    addedObjections: number;
+    todo: string[];
+    summary: string;
+  };
 };
 
 export const HANDOFF_TRIGGER_LABELS: Record<HandoffTrigger, string> = {

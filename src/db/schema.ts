@@ -154,7 +154,7 @@ export const faqs = pgTable("faqs", {
   tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   question: text("question").notNull(),
   answer: text("answer").notNull(),
-  source: text("source").$type<"manual" | "learned">().notNull().default("manual"),
+  source: text("source").$type<"manual" | "learned" | "ai">().notNull().default("manual"),
   createdAt: createdAt(),
 });
 
@@ -163,7 +163,7 @@ export const objections = pgTable("objections", {
   tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   objection: text("objection").notNull(),
   response: text("response").notNull(),
-  source: text("source").$type<"manual" | "learned">().notNull().default("manual"),
+  source: text("source").$type<"manual" | "learned" | "ai">().notNull().default("manual"),
   createdAt: createdAt(),
 });
 

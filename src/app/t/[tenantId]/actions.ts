@@ -33,6 +33,7 @@ import {
   sendHumanReply,
 } from "@/lib/agent/engine";
 import { generateGrowthReport } from "@/lib/agent/jobs";
+import { runAutofill, type AutofillResult } from "@/lib/agent/autofill";
 import type { ActionResult } from "@/components/action-form";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
@@ -527,4 +528,34 @@ export async function testChatReset(fd: FormData) {
   if (!s) return;
   await db.delete(customers).where(and(eq(customers.tenantId, tenant.id), eq(customers.channelType, "test"), eq(customers.externalId, `test:${s.uid}`)));
   rp(tenant, "/test");
+}
+
+/* ───────── AI business setup agent ───────── */
+
+export type AutofillState = AutofillResult | null;
+
+const AUDIO_TYPES = /^audio\/(webm|mp4|m4a|x-m4a|mpeg|mp3|ogg|wav|x-wav|aac|flac)/;
+
+export async function autofillAction(_: AutofillState, fd: FormData): Promise<AutofillState> {
+  const { tenant } = await ctx(fd);
+  const empty = { ok: false, filledKeys: [], addedProducts: [], addedFaqs: 0, addedObjections: 0, updatedSettings: [], todo: [], summary: "" };
+  let audio: { mime: string; data: Buffer } | undefined;
+  for (const field of ["audio", "audioFile"]) {
+    const f = fd.get(field);
+    if (f instanceof File && f.size > 0) {
+      if (f.size > 4_500_000) return { ...empty, error: "အသံဖိုင် ကြီးလွန်းပါတယ် (4MB အောက်)" };
+      const mime = (f.type || "audio/webm").split(";")[0];
+      if (!AUDIO_TYPES.test(mime)) return { ...empty, error: `ဒီအသံဖိုင်အမျိုးအစား (${mime}) ကို မထောက်ပံ့ပါ` };
+      audio = { mime, data: Buffer.from(await f.arrayBuffer()) };
+      break;
+    }
+  }
+  try {
+    const r = await runAutofill({ tenantId: tenant.id, text: str(fd, "text").slice(0, 8000), audio, overwrite: bool(fd, "overwrite") });
+    revalidatePath(`/t/${tenant.id}`, "layout");
+    return r;
+  } catch (e) {
+    console.error("autofill failed", e);
+    return { ...empty, error: `AI error: ${(e as Error).message}` };
+  }
 }
