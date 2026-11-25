@@ -2,6 +2,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "driz
 import { db } from "@/db";
 import { customers, faqs, lessons, messages, objections, orders, platformSettings, reports, tenants, type Customer, type Tenant } from "@/db/schema";
 import { resolveSettings } from "@/lib/settings";
+import { randomCode } from "@/lib/crypto";
 import { hours, inQuietHours, minutes, mmHour } from "@/lib/time";
 import { messengerWindowOpen, sendToCustomer } from "@/lib/channels/outbound";
 import { notifyAdmins, notifySuperAdmin } from "@/lib/notify";
@@ -31,8 +32,13 @@ export async function tick() {
   return result;
 }
 
+/** Creates the platform settings row if missing and makes sure a Super Admin link code exists. */
 export async function ensurePlatformRow() {
-  await db.insert(platformSettings).values({ id: 1 }).onConflictDoNothing();
+  await db.insert(platformSettings).values({ id: 1, superAdminLinkCode: randomCode(8) }).onConflictDoNothing();
+  await db
+    .update(platformSettings)
+    .set({ superAdminLinkCode: randomCode(8) })
+    .where(and(eq(platformSettings.id, 1), isNull(platformSettings.superAdminLinkCode)));
 }
 
 const tenantCache = new Map<string, Tenant>();

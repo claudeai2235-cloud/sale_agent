@@ -3,9 +3,9 @@
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { platformSettings, users } from "@/db/schema";
+import { users } from "@/db/schema";
 import { createSession, destroySession, hashPassword, verifyLogin } from "@/lib/auth";
-import { randomCode } from "@/lib/crypto";
+import { ensurePlatformRow } from "@/lib/agent/jobs";
 import type { ActionResult } from "@/components/action-form";
 
 export async function loginAction(_: ActionResult, fd: FormData): Promise<ActionResult> {
@@ -31,7 +31,7 @@ export async function setupAction(_: ActionResult, fd: FormData): Promise<Action
     .insert(users)
     .values({ email, name: String(fd.get("name") ?? "Admin"), passwordHash: await hashPassword(password), role: "super_admin" })
     .returning();
-  await db.insert(platformSettings).values({ id: 1, superAdminLinkCode: randomCode(8) }).onConflictDoNothing();
+  await ensurePlatformRow();
   await createSession({ uid: u.id, role: u.role, tid: null, name: u.name });
   redirect("/control");
 }
