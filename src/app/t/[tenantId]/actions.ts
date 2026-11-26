@@ -324,11 +324,28 @@ export async function connectMessenger(_: ActionResult, fd: FormData) {
   if (token.length < 50) return fail("Page Access Token ထည့်ပါ");
   if (!process.env.META_APP_SECRET || !process.env.META_VERIFY_TOKEN) return fail("META_APP_SECRET / META_VERIFY_TOKEN environment variables မသတ်မှတ်ရသေးပါ");
   const api = new MessengerApi(token);
-  let me;
+  const pageIdInput = str(fd, "pageId").replace(/\D/g, "");
+  let me: { id: string; name: string } | null = null;
+  let firstError = "";
   try {
     me = await api.me();
   } catch (e) {
-    return fail(`Token မှားနေပါတယ်: ${(e as Error).message}`);
+    firstError = (e as Error).message;
+    // Reading the Page name needs pages_read_engagement; the ID alone or a typed Page ID is enough to work.
+    try {
+      const r = await api.meId();
+      me = { id: r.id, name: pageIdInput ? "Facebook Page" : `Page ${r.id}` };
+    } catch {
+      if (pageIdInput) me = { id: pageIdInput, name: `Page ${pageIdInput}` };
+    }
+  }
+  if (!me) {
+    return fail(
+      `Token ကို စစ်လို့မရပါ (${firstError})။ Page Access Token အသစ်ကို pages_messaging, pages_read_engagement, pages_manage_metadata ခွင့်ပြုချက်တွေနဲ့ ထုတ်ပါ (သို့) အောက်က “Page ID” ကွက်ထဲ Page ID ထည့်ပြီး ပြန်ချိတ်ပါ။`,
+    );
+  }
+  if (pageIdInput && pageIdInput !== me.id && !firstError) {
+    return fail(`ဒီ Token က Page ID ${me.id} အတွက်ပါ — ထည့်ထားတဲ့ Page ID (${pageIdInput}) နဲ့ မကိုက်ပါ။ User token မဟုတ်ဘဲ Page token ဖြစ်ရပါမယ်။`);
   }
   const [dup] = await db.select().from(channels).where(and(eq(channels.type, "messenger"), eq(channels.externalId, me.id))).limit(1);
   if (dup && dup.tenantId !== tenant.id) return fail("ဒီ Page ကို တခြားလုပ်ငန်းမှာ ချိတ်ထားပြီးသားပါ");
@@ -339,7 +356,9 @@ export async function connectMessenger(_: ActionResult, fd: FormData) {
     await api.subscribeApp();
   } catch (e) {
     await db.update(channels).set({ lastError: (e as Error).message }).where(eq(channels.id, ch.id));
-    return fail(`Page ကို App နဲ့ Subscribe မလုပ်နိုင်ပါ: ${(e as Error).message}`);
+    return fail(
+      `Page ကို သိမ်းပြီးပါပြီ၊ ဒါပေမဲ့ App နဲ့ Subscribe မလုပ်နိုင်ပါ (${(e as Error).message})။ Token ကို pages_manage_metadata ခွင့်ပြုချက်နဲ့ ပြန်ထုတ်ပြီး ထပ်ချိတ်ပါ — (သို့) Meta App → Messenger → Webhooks မှာ ဒီ Page ကို Subscribe ကိုယ်တိုင် နှိပ်ပါ။`,
+    );
   }
   rp(tenant, "/channels");
   return ok(`✅ “${me.name}” Page ချိတ်ဆက်ပြီးပါပြီ`);

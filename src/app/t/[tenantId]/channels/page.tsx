@@ -85,8 +85,11 @@ export default async function ChannelsPage({ params }: PageProps<"/t/[tenantId]/
           </ol>
           <ActionForm action={connectMessenger} resetOnSuccess>
             {hid}
-            <Field label="Page Access Token">
+            <Field label="Page Access Token" hint="Page token ဖြစ်ရမယ် (User token မဟုတ်) — pages_messaging, pages_read_engagement, pages_manage_metadata ခွင့်ပြုချက်ပါရမယ်">
               <Input name="token" type="password" placeholder="EAA…" autoComplete="off" required />
+            </Field>
+            <Field label="Page ID (မထည့်လည်းရ)" hint="Token စစ်လို့မရရင် သုံးပါတယ် — Facebook Page → About → Page transparency (သို့) Meta Business Suite မှာ ကြည့်ပါ">
+              <Input name="pageId" inputMode="numeric" placeholder="1234567890" autoComplete="off" />
             </Field>
             <SubmitButton>ချိတ်မည်</SubmitButton>
           </ActionForm>

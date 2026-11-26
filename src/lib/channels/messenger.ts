@@ -26,6 +26,11 @@ export class MessengerApi {
     return this.req<{ id: string; name: string }>("me", { query: { fields: "id,name" } });
   }
 
+  /** Just the Page ID — needs fewer permissions than reading the name. */
+  meId() {
+    return this.req<{ id: string }>("me", { query: { fields: "id" } });
+  }
+
   /** Sends a text. `tag` is only used for human replies outside the 24h window (HUMAN_AGENT needs Meta approval). */
   sendText(psid: string, text: string, tag?: "HUMAN_AGENT") {
     return this.req<{ message_id: string }>("me/messages", {
