@@ -6,8 +6,8 @@ import { resolveSettings } from "@/lib/settings";
 import { appUrl } from "@/lib/notify";
 import { fmt } from "@/lib/time";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Card, Field, Input, PageHeader } from "@/components/ui";
-import { connectMessenger, connectTelegram, deleteChannel, regenerateLinkCode, removeAdminChat, scanMessengerBacklog, toggleChannel } from "../actions";
+import { Badge, Card, Field, Input, PageHeader, Select, Toggle } from "@/components/ui";
+import { connectMessenger, connectTelegram, deleteChannel, regenerateLinkCode, removeAdminChat, saveAutoScan, scanMessengerBacklog, toggleChannel } from "../actions";
 
 export default async function ChannelsPage({ params }: PageProps<"/t/[tenantId]/channels">) {
   const { tenantId } = await params;
@@ -21,6 +21,31 @@ export default async function ChannelsPage({ params }: PageProps<"/t/[tenantId]/
     <div className="max-w-4xl space-y-6">
       <PageHeader title="Messenger / Telegram ချိတ်ဆက်ခြင်း" desc="Token တွေကို Database ထဲမှာ Encrypt လုပ်ပြီး သိမ်းပါတယ်။ Chat ထဲ ဘယ်တော့မှ မပို့ပါနဲ့။" />
 
+      <Card title="🔄 Auto — မဖြေရသေးတာတွေ စစ်ပြီး အလိုအလျောက် ဖြေမည်">
+        <ActionForm action={saveAutoScan} className="space-y-3">
+          {hid}
+          <Toggle name="enabled" label={s.autoScan.enabled ? "ဖွင့်ထားသည် — Thiri က အလိုအလျောက် စစ်ပြီး ဖြေနေပါတယ်" : "ပိတ်ထားသည်"} defaultChecked={s.autoScan.enabled} />
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="ဘယ်နှမိနစ်တစ်ခါ စစ်မလဲ">
+              <Select name="intervalMinutes" defaultValue={String(s.autoScan.intervalMinutes)}>
+                {[1, 2, 3, 5, 10, 15, 30].map((m) => (
+                  <option key={m} value={m}>
+                    {m} မိနစ်
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <SubmitButton>သိမ်းမည်</SubmitButton>
+          </div>
+          <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
+            <li>Webhook ကနေ ရောက်လာတဲ့ စာအသစ်တိုင်းကို Thiri က ချက်ချင်း ဖြေပါတယ် (ဒီခလုတ် ပိတ်ထားလည်း ဖြေပါတယ်)။</li>
+            <li>ဖွင့်ထားရင် — Messenger Inbox ကို မိနစ်အလိုက် ဆွဲစစ်ပြီး Webhook လွတ်သွားတဲ့စာ၊ Customer ထပ်မေးထားတာ၊ ပို့မရခဲ့တာတွေကို ကိုယ်တိုင် နှိပ်စရာမလိုဘဲ ဖြေပေးပါမယ်။ Telegram Webhook ပျက်နေရင်လည်း အလိုအလျောက် ပြန်ပြင်ပေးပါမယ်။</li>
+            <li>၂၄ နာရီကျော်သွားတဲ့ Messenger စာတွေကိုတော့ Meta က ခွင့်မပြုလို့ Inbox → “မဖြေရသေး” မှာ လူကိုယ်တိုင် ဖြေရပါမယ်။</li>
+            <li>cron-job.org က /api/cron ကို ၁ မိနစ်တစ်ခါ ခေါ်နေမှ Auto အလုပ်လုပ်ပါမယ်။</li>
+          </ul>
+        </ActionForm>
+      </Card>
+
       <Card title="ချိတ်ထားသော Channel များ">
         {!list.length && <p className="text-sm text-muted">မချိတ်ရသေးပါ</p>}
         <div className="divide-y divide-line">
@@ -32,6 +57,19 @@ export default async function ChannelsPage({ params }: PageProps<"/t/[tenantId]/
                   {c.name} <span className="text-xs text-muted">{c.type === "telegram" ? `@${c.externalId}` : `Page ID ${c.externalId}`}</span>
                 </div>
                 {c.lastError && <div className="truncate text-xs text-red-600">နောက်ဆုံး Error: {c.lastError}</div>}
+                <div className="text-xs text-muted">
+                  📨 နောက်ဆုံး Webhook: {c.meta.lastWebhookAt ? fmt(c.meta.lastWebhookAt) : "မရောက်သေး"}
+                  {c.meta.lastScan && (
+                    <>
+                      {" · "}🔄 နောက်ဆုံးစစ်: {fmt(c.meta.lastScan.at)} {c.meta.lastScan.auto ? "(Auto)" : "(Manual)"}
+                      {c.type === "messenger" && !c.meta.lastScan.error && ` — စာသစ် ${c.meta.lastScan.imported}၊ ဖြေ ${c.meta.lastScan.answered}၊ လူဖြေရန် ${c.meta.lastScan.manual}`}
+                    </>
+                  )}
+                </div>
+                {c.meta.lastScan?.error && <div className="truncate text-xs text-amber-700">⚠️ {c.meta.lastScan.error}</div>}
+                {c.type === "messenger" && (c.meta.lastScan?.imported ?? 0) > 0 && (
+                  <div className="text-xs text-amber-700">Webhook က စာတချို့ လွတ်သွားလို့ Auto က ဆွဲဖြေပေးခဲ့ပါတယ် — Meta App ကို Live + Webhook “messages” subscribe ဖြစ်မဖြစ် စစ်ပါ</div>
+                )}
                 {Object.values(c.meta.business ?? {}).map((b) => (
                   <div key={b.id} className="text-xs text-muted">
                     💼 Telegram Business: {b.ownerName} ရဲ့ Account — {b.enabled && b.canReply ? <span className="text-emerald-600">Thiri ဖြေနေ</span> : <span className="text-red-600">ပိတ်/ဖြေခွင့်မရှိ</span>}

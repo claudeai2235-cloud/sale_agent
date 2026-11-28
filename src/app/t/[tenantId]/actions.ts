@@ -1,5 +1,6 @@
 "use server";
 
+import { scanMessengerChannel } from "@/lib/agent/backlog";
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
@@ -23,7 +24,6 @@ import { resolveSettings, type HandoffTrigger, type TenantSettings } from "@/lib
 import { TelegramApi } from "@/lib/channels/telegram";
 import { MessengerApi } from "@/lib/channels/messenger";
 import { appUrl } from "@/lib/notify";
-import { messengerWindowOpen } from "@/lib/channels/outbound";
 import {
   cancelOrder,
   confirmOrder,
@@ -397,58 +397,21 @@ export async function scanMessengerBacklog(_: ActionResult, fd: FormData) {
   const { tenant } = await ctx(fd);
   const [ch] = await db.select().from(channels).where(and(eq(channels.id, str(fd, "channelId")), eq(channels.tenantId, tenant.id))).limit(1);
   if (!ch || ch.type !== "messenger") return fail("Messenger channel မတွေ့ပါ");
-  const api = new MessengerApi(decrypt(ch.token));
-  let convs;
-  try {
-    convs = await api.conversations(50);
-  } catch (e) {
-    return fail(`Conversation ဆွဲမရပါ: ${(e as Error).message} (pages_messaging / pages_read_engagement ခွင့်ပြုချက် လိုပါတယ်)`);
-  }
-  let answered = 0;
-  let manual = 0;
-  for (const conv of convs.data) {
-    const msgs = (conv.messages?.data ?? []).slice().reverse(); // oldest → newest
-    const last = msgs[msgs.length - 1];
-    if (!last || last.from.id === ch.externalId) continue; // page already replied
-    const lastPageIdx = msgs.map((m) => m.from.id).lastIndexOf(ch.externalId);
-    const unanswered = msgs.slice(lastPageIdx + 1);
-    const person = conv.participants.data.find((p) => p.id !== ch.externalId);
-    if (!person) continue;
-    let customerId: string | null = null;
-    for (const m of unanswered) {
-      const r = await ingestInbound({
-        tenant,
-        channel: ch,
-        channelType: "messenger",
-        externalUserId: person.id,
-        displayName: person.name,
-        text: m.message ?? "",
-        externalMessageId: m.id,
-        at: new Date(m.created_time),
-      });
-      if (r) customerId = r.customer.id;
-    }
-    if (!customerId) {
-      const [c] = await db
-        .select({ id: customers.id })
-        .from(customers)
-        .where(and(eq(customers.tenantId, tenant.id), eq(customers.channelType, "messenger"), eq(customers.externalId, person.id)))
-        .limit(1);
-      customerId = c?.id ?? null;
-    }
-    if (!customerId) continue;
-    const [c] = await db.select().from(customers).where(eq(customers.id, customerId)).limit(1);
-    if (messengerWindowOpen(c, 5)) {
-      await processCustomer(c.id);
-      answered++;
-    } else {
-      await db.update(messages).set({ handled: true }).where(and(eq(messages.customerId, c.id), eq(messages.handled, false)));
-      await db.update(customers).set({ unanswered: true }).where(eq(customers.id, c.id));
-      manual++;
-    }
-  }
+  const r = await scanMessengerChannel(tenant, ch, { auto: false, maxAnswer: 25 });
+  if (r.error) return fail(`Conversation ဆွဲမရပါ: ${r.error} (pages_messaging / pages_read_engagement ခွင့်ပြုချက် လိုပါတယ်)`);
   rp(tenant, "/inbox");
-  return ok(`စစ်ပြီးပါပြီ — Thiri ဖြေပေးလိုက်တာ ${answered} ယောက်၊ ၂၄ နာရီကျော်လို့ လူကိုယ်တိုင် ဖြေရမယ့်သူ ${manual} ယောက် (Inbox → “မဖြေရသေး” မှာ ကြည့်ပါ)`);
+  rp(tenant, "/channels");
+  return ok(`စစ်ပြီးပါပြီ — စာအသစ် ${r.imported} စောင် ဆွဲယူ၊ Thiri ဖြေပေးလိုက်တာ ${r.answered} ယောက်၊ ၂၄ နာရီကျော်လို့ လူကိုယ်တိုင် ဖြေရမယ့်သူ ${r.manual} ယောက် (Inbox → “မဖြေရသေး” မှာ ကြည့်ပါ)`);
+}
+
+/** Switches the automatic "check unanswered and reply" job on/off. */
+export async function saveAutoScan(_: ActionResult, fd: FormData) {
+  const { tenant } = await ctx(fd);
+  await patchSettings(tenant, {
+    autoScan: { enabled: bool(fd, "enabled"), intervalMinutes: Math.min(60, Math.max(1, num(fd, "intervalMinutes", 3))) },
+  });
+  rp(tenant, "/channels");
+  return ok(bool(fd, "enabled") ? "✅ Auto စစ်ဆေးပြီး ဖြေခြင်း ဖွင့်ပြီးပါပြီ" : "⏸ Auto စစ်ဆေးခြင်း ပိတ်ထားပါပြီ (Webhook နဲ့ ရောက်လာတဲ့စာတွေကိုတော့ ဆက်ဖြေပါမယ်)");
 }
 
 /* ───────── Inbox ───────── */

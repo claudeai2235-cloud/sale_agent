@@ -30,6 +30,8 @@ export type TenantSettings = {
   };
   /** 24/7 mode: the AI keeps answering even during handoffs or AI errors, unless a human is actively replying. */
   alwaysOn: { enabled: boolean; humanGraceMinutes: number };
+  /** Automatic "check unanswered and reply": scans the Messenger inbox / Telegram webhook and re-answers missed chats. */
+  autoScan: { enabled: boolean; intervalMinutes: number };
   ai: {
     chatModel: string; // empty = platform default
     thinkingLevel: "default" | "low" | "medium" | "high";
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: TenantSettings = {
     goal: "Customer ရဲ့ လိုအပ်ချက်နဲ့ ကိုက်တဲ့ ပစ္စည်း/Course ကို ဝယ်ဖြစ်အောင် — Order အတွက် လိုအပ်တဲ့ အချက်အလက်ယူပြီး ငွေလွှဲ Screenshot ရတဲ့အထိ ပိတ်ပါ",
   },
   alwaysOn: { enabled: true, humanGraceMinutes: 10 },
+  autoScan: { enabled: true, intervalMinutes: 3 },
   ai: {
     chatModel: "",
     thinkingLevel: "low",

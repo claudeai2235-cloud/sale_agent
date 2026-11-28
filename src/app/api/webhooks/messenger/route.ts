@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { channels, customers, messages, tenants, type Channel } from "@/db/schema";
 import { resolveSettings } from "@/lib/settings";
@@ -30,6 +30,10 @@ export async function POST(req: Request) {
     for (const entry of body.entry ?? []) {
       const [ch] = await db.select().from(channels).where(and(eq(channels.type, "messenger"), eq(channels.externalId, entry.id))).limit(1);
       if (!ch || !ch.active) continue;
+      await db
+        .update(channels)
+        .set({ meta: sql`${channels.meta} || ${JSON.stringify({ lastWebhookAt: new Date().toISOString() })}::jsonb` })
+        .where(eq(channels.id, ch.id));
       for (const ev of entry.messaging ?? []) {
         try {
           await handleEvent(ch, ev);

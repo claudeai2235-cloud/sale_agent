@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { channels, platformSettings, tenants } from "@/db/schema";
 import { decrypt } from "@/lib/crypto";
@@ -32,6 +32,10 @@ export async function POST(req: Request, ctx: RouteContext<"/api/webhooks/telegr
   const [ch] = await db.select().from(channels).where(eq(channels.id, key)).limit(1);
   if (!ch || ch.type !== "telegram" || secret !== ch.secret) return new Response("forbidden", { status: 403 });
   if (!ch.active) return Response.json({ ok: true });
+  await db
+    .update(channels)
+    .set({ meta: sql`${channels.meta} || ${JSON.stringify({ lastWebhookAt: new Date().toISOString() })}::jsonb` })
+    .where(eq(channels.id, ch.id));
   const bot = new TelegramApi(decrypt(ch.token));
   const botKey = `channel:${ch.id}`;
 

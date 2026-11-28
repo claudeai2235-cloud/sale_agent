@@ -8,6 +8,7 @@ import { hours, inQuietHours, minutes, mmHour } from "@/lib/time";
 import { messengerWindowOpen, sendToCustomer } from "@/lib/channels/outbound";
 import { notifyAdmins, notifySuperAdmin } from "@/lib/notify";
 import { countdownFor } from "@/lib/countdown";
+import { runAutoScans } from "./backlog";
 import { generate, platformModels } from "./gemini";
 import { buildSystemPrompt, type Knowledge } from "./prompt";
 import { botPaused, historyContents, loadKnowledge, openOrderFor, paymentInfoText, processCustomer, tenantServing } from "./engine";
@@ -25,8 +26,9 @@ export async function tick() {
     .returning({ id: platformSettings.id });
   if (!claimed.length) return { ran: false };
 
-  const result = { ran: true, swept: 0, followups: 0, reminders: 0, learned: 0, billing: 0, summaries: 0 };
+  const result = { ran: true, swept: 0, scanned: 0, followups: 0, reminders: 0, learned: 0, billing: 0, summaries: 0 };
   result.swept = await sweepUnanswered().catch((e) => (console.error("sweep", e), 0));
+  result.scanned = await runAutoScans().catch((e) => (console.error("auto scan", e), 0));
   result.followups = await runFollowups().catch((e) => (console.error("followups", e), 0));
   result.reminders = await runPaymentReminders().catch((e) => (console.error("reminders", e), 0));
   result.learned = await runLearning().catch((e) => (console.error("learning", e), 0));

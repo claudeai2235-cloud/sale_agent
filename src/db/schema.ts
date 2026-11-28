@@ -100,7 +100,13 @@ export const aiUsage = pgTable(
 /* ───────────── Channels ───────────── */
 
 export type BusinessConnection = { id: string; ownerUserId: string; ownerName: string; canReply: boolean; enabled: boolean; at: string };
-export type ChannelMeta = { business?: Record<string, BusinessConnection> };
+export type ChannelMeta = {
+  business?: Record<string, BusinessConnection>;
+  /** Result of the last "check unanswered & reply" scan (manual or automatic). */
+  lastScan?: { imported: number; answered: number; manual: number; error?: string; at: string; auto: boolean };
+  /** Last time a webhook event arrived for this channel. */
+  lastWebhookAt?: string;
+};
 
 export const channels = pgTable(
   "channels",
