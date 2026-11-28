@@ -36,8 +36,29 @@ export default async function PersonaPage({ params }: PageProps<"/t/[tenantId]/p
             </Field>
           </div>
           <div className="mt-4">
+            <Field
+              label="🎯 Thiri ရဲ့ ရည်မှန်းချက် (Goal)"
+              hint="စကားဝိုင်းတိုင်း ဒီရည်မှန်းချက်ဆီ တစ်လှမ်းချင်း ဆွဲခေါ်ပါမယ် — Customer က အကြောင်းအရာ လွဲသွားရင်လည်း Data နဲ့ ဖြေပြီး ဒီဘက် ပြန်ဆွဲပါမယ်"
+            >
+              <Textarea name="goal" defaultValue={s.persona.goal} rows={2} />
+            </Field>
+          </div>
+          <div className="mt-4">
             <Field label="ထပ်ဆောင်း ပြောဆိုပုံ ညွှန်ကြားချက်" hint="ဥပမာ — Customer ကို ‘အစ်ကို/အစ်မ’ လို့ ခေါ်ပါ၊ ဆရာ့နာမည် ‘ဆရာဇွဲ’ လို့ ပြောပါ">
               <Textarea name="extraStyle" defaultValue={s.persona.extraStyle} />
+            </Field>
+          </div>
+        </Card>
+        <Card title="🕐 ၂၄ နာရီ မနားတမ်း ဖြေမည် (24/7)">
+          <div className="space-y-3">
+            <Toggle
+              name="alwaysOn"
+              label="AI က ၂၄ နာရီ မနားတမ်း ဖြေမည်"
+              hint="လူကိုလွှဲထားချိန်မှာလည်း Admin ကို အကြောင်းကြားပြီး Data နဲ့ ဆက်ဖြေပေးမယ်။ AI ခဏ error ဖြစ်ရင်လည်း Customer ကို မစောင့်ခိုင်းဘဲ ပြန်ကြိုးစားပြီး ဖြေမယ်။ Admin က ကိုယ်တိုင်ဝင်ဖြေနေရင်တော့ ကြားမဝင်ပါ။"
+              defaultChecked={s.alwaysOn.enabled}
+            />
+            <Field label="Admin ကိုယ်တိုင်ဖြေပြီးရင် AI ဘယ်နှမိနစ် စောင့်မလဲ" hint="ဒီအချိန်အတွင်း Admin ဖြေနေရင် AI မဝင်ပါ — ပြီးရင် AI ပြန်ဖြေပါမယ်">
+              <Input name="humanGraceMinutes" type="number" min={1} max={240} defaultValue={s.alwaysOn.humanGraceMinutes} />
             </Field>
           </div>
         </Card>

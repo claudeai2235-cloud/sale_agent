@@ -8,7 +8,7 @@ import { messengerWindowOpen, sendToCustomer } from "@/lib/channels/outbound";
 import { notifyAdmins, notifySuperAdmin } from "@/lib/notify";
 import { generate, platformModels } from "./gemini";
 import { buildSystemPrompt, type Knowledge } from "./prompt";
-import { botPaused, historyContents, loadKnowledge, openOrderFor, paymentInfoText, tenantServing } from "./engine";
+import { botPaused, historyContents, loadKnowledge, openOrderFor, paymentInfoText, processCustomer, tenantServing } from "./engine";
 
 /* ───────────── Scheduler tick ───────────── */
 
@@ -23,7 +23,8 @@ export async function tick() {
     .returning({ id: platformSettings.id });
   if (!claimed.length) return { ran: false };
 
-  const result = { ran: true, followups: 0, reminders: 0, learned: 0, billing: 0, summaries: 0 };
+  const result = { ran: true, swept: 0, followups: 0, reminders: 0, learned: 0, billing: 0, summaries: 0 };
+  result.swept = await sweepUnanswered().catch((e) => (console.error("sweep", e), 0));
   result.followups = await runFollowups().catch((e) => (console.error("followups", e), 0));
   result.reminders = await runPaymentReminders().catch((e) => (console.error("reminders", e), 0));
   result.learned = await runLearning().catch((e) => (console.error("learning", e), 0));
@@ -47,6 +48,40 @@ async function tenantOf(id: string) {
   const [t] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
   tenantCache.set(id, t);
   return t;
+}
+
+/* ───────────── 24/7 sweeper ───────────── */
+
+/**
+ * Safety net for 24/7 replies: any customer message that is still unhandled a minute
+ * after it arrived (function timeout, AI error, cold start…) gets processed again.
+ */
+export async function sweepUnanswered(limit = 10) {
+  const rows = await db
+    .selectDistinct({ customerId: messages.customerId })
+    .from(messages)
+    .innerJoin(customers, eq(customers.id, messages.customerId))
+    .where(
+      and(
+        eq(messages.direction, "in"),
+        eq(messages.handled, false),
+        lt(messages.createdAt, new Date(Date.now() - 60_000)),
+        gt(messages.createdAt, new Date(Date.now() - hours(24))),
+        inArray(customers.channelType, ["telegram", "messenger"]),
+        or(isNull(customers.processingUntil), lt(customers.processingUntil, new Date())),
+      ),
+    )
+    .limit(limit);
+  let n = 0;
+  for (const r of rows) {
+    try {
+      await processCustomer(r.customerId);
+      n++;
+    } catch (e) {
+      console.error("sweep failed", r.customerId, e);
+    }
+  }
+  return n;
 }
 
 /* ───────────── Follow-ups ───────────── */

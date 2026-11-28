@@ -31,6 +31,7 @@ import {
   processCustomer,
   resumeBot,
   sendHumanReply,
+  ADMIN_PAUSE_REASON,
 } from "@/lib/agent/engine";
 import { generateGrowthReport } from "@/lib/agent/jobs";
 import { runAutofill, type AutofillResult } from "@/lib/agent/autofill";
@@ -202,6 +203,11 @@ export async function savePersona(_: ActionResult, fd: FormData) {
       emojiLevel: (str(fd, "emojiLevel") || "low") as "low",
       maxBubbles: Math.min(5, Math.max(1, num(fd, "maxBubbles", 3))),
       extraStyle: str(fd, "extraStyle"),
+      goal: str(fd, "goal"),
+    },
+    alwaysOn: {
+      enabled: bool(fd, "alwaysOn"),
+      humanGraceMinutes: Math.min(240, Math.max(1, num(fd, "humanGraceMinutes", 10))),
     },
     ai: {
       chatModel: str(fd, "chatModel"),
@@ -462,7 +468,7 @@ export async function botControlAction(fd: FormData) {
   if (!c) return;
   const op = str(fd, "op");
   if (op === "resume") await resumeBot(c.id);
-  if (op === "pause") await db.update(customers).set({ botPausedUntil: new Date(Date.now() + 7 * 86_400_000), needsHuman: true, handoffReason: "Admin က ရပ်ထားသည်" }).where(eq(customers.id, c.id));
+  if (op === "pause") await db.update(customers).set({ botPausedUntil: new Date(Date.now() + 7 * 86_400_000), needsHuman: true, handoffReason: ADMIN_PAUSE_REASON }).where(eq(customers.id, c.id));
   if (op === "answer") {
     // Let Thiri answer the latest customer messages now.
     await resumeBot(c.id);

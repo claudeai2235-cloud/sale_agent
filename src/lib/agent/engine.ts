@@ -268,7 +268,9 @@ async function handleTurn(customerId: string, pending: Message[], opts: { force?
   const s = resolveSettings(tenant.settings);
   const pendingIds = pending.map((m) => m.id);
 
-  if (!opts.force && (!(await tenantServing(tenant)) || botPaused(customer))) {
+  const paused = botPaused(customer);
+  const answerDuringPause = paused && (await shouldAnswerDuringPause(s, customer));
+  if (!opts.force && (!(await tenantServing(tenant)) || (paused && !answerDuringPause))) {
     await markHandled(pendingIds); // stays "unanswered" for humans in the inbox
     return;
   }
@@ -276,10 +278,14 @@ async function handleTurn(customerId: string, pending: Message[], opts: { force?
   // Keyword triggers → immediate handoff without calling the AI.
   const combined = pending.map((m) => m.text).join("\n").toLowerCase();
   const kw = s.handoff.enabled ? s.handoff.keywords.find((k) => k.trim() && combined.includes(k.trim().toLowerCase())) : undefined;
-  if (kw) {
+  if (kw && !s.alwaysOn.enabled) {
     await markHandled(pendingIds);
     await startHandoff(tenant, s, customer, "custom", `Keyword: “${kw}”`, combined);
     return;
+  }
+  if (kw && !answerDuringPause) {
+    // 24/7: alert the admin about the keyword, then keep answering below.
+    await startHandoff(tenant, s, customer, "custom", `Keyword: “${kw}”`, combined, { silent: true });
   }
 
   const knowledge = await loadKnowledge(tenant.id);
@@ -295,21 +301,56 @@ async function handleTurn(customerId: string, pending: Message[], opts: { force?
       model: s.ai.chatModel || models.chat,
       fallbackModel: models.lite,
       purpose: "chat",
-      system: buildSystemPrompt(tenant, s, knowledge, customer, openOrder),
+      system: buildSystemPrompt(tenant, s, knowledge, customer, openOrder, { duringHandoff: answerDuringPause || (opts.force === true && paused) }),
       contents,
       schema: REPLY_SCHEMA,
       temperature: s.ai.temperature,
       thinkingLevel: s.ai.thinkingLevel,
     });
   } catch (e) {
-    console.error("AI failed; handing off", e);
+    console.error("AI failed", e);
+    if (s.alwaysOn.enabled) {
+      // 24/7: never go silent. Leave the messages unhandled so the sweeper retries,
+      // and send one short holding message (at most once per 10 minutes).
+      await sendHoldingMessage(s, customer);
+      return;
+    }
     await markHandled(pendingIds);
     await startHandoff(tenant, s, customer, "uncertain", "AI error — ယာယီ ဖြေမရဖြစ်နေပါတယ်", combined, { silent: true });
     return;
   }
 
   await markHandled(pendingIds);
-  await applyReply(tenant, s, customer, knowledge, openOrder, r, pending);
+  await applyReply(tenant, s, customer, knowledge, openOrder, r, pending, { duringHandoff: answerDuringPause });
+}
+
+/**
+ * 24/7 mode: while a handoff is open the AI still answers, unless an admin paused the bot
+ * on purpose or a human replied to this customer within the grace period.
+ */
+async function shouldAnswerDuringPause(s: TenantSettings, customer: Customer) {
+  if (!s.alwaysOn.enabled) return false;
+  if (customer.handoffReason === ADMIN_PAUSE_REASON) return false;
+  const since = new Date(Date.now() - minutes(Math.max(1, s.alwaysOn.humanGraceMinutes)));
+  const [recentHuman] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.customerId, customer.id), eq(messages.sender, "human"), gt(messages.createdAt, since)))
+    .limit(1);
+  return !recentHuman;
+}
+
+export const ADMIN_PAUSE_REASON = "Admin က ရပ်ထားသည်";
+
+async function sendHoldingMessage(s: TenantSettings, customer: Customer) {
+  const [recent] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.customerId, customer.id), eq(messages.direction, "out"), gt(messages.createdAt, new Date(Date.now() - minutes(10)))))
+    .limit(1);
+  if (recent) return;
+  const p = s.persona.politeParticle;
+  await sendToCustomer(customer, [`ခဏလေးနော်${p}၊ သေချာစစ်ပြီး ချက်ချင်း ပြန်ဖြေပေးပါမယ်${p}့။`], { sender: "bot", meta: { holding: true } });
 }
 
 const trig = (s: TenantSettings, t: HandoffTrigger) => s.handoff.enabled && s.handoff.triggers[t];
@@ -322,6 +363,7 @@ export async function applyReply(
   openOrder: Order | null,
   r: AgentReply,
   pending: Message[],
+  ctx: { duringHandoff?: boolean } = {},
 ) {
   // 1) Customer data & stage
   await updateCustomerFromReply(customer, r);
@@ -363,11 +405,18 @@ export async function applyReply(
 
   // 6) Send
   const fresh = (await db.select().from(customers).where(eq(customers.id, customer.id)).limit(1))[0];
-  if (handoffCat) {
+  if (handoffCat && !s.alwaysOn.enabled) {
     const first = handoffCat === "complaint" || handoffCat === "angry" ? (r.reply ?? []).slice(0, 1) : [];
     await sendToCustomer(fresh, first, { sender: "bot" });
     await startHandoff(tenant, s, fresh, handoffCat, r.handoff?.reason || (lowConfidence ? "Bot မသေချာပါ" : ""), pending.map((m) => m.text).join("\n"));
     return;
+  }
+  if (handoffCat && s.alwaysOn.enabled && !ctx.duringHandoff) {
+    // 24/7: alert the admin, but keep helping the customer from the data instead of going quiet.
+    await startHandoff(tenant, s, fresh, handoffCat, r.handoff?.reason || (lowConfidence ? "Bot မသေချာပါ" : ""), pending.map((m) => m.text).join("\n"), {
+      silent: true,
+    });
+    if (handoffCat === "ask_human" && s.handoff.customerMessage.trim()) extra.push(s.handoff.customerMessage);
   }
 
   const images = (r.send_product_images ?? [])

@@ -25,7 +25,11 @@ export type TenantSettings = {
     emojiLevel: "none" | "low" | "medium";
     maxBubbles: number;
     extraStyle: string;
+    /** What every conversation should move toward (e.g. close the order). */
+    goal: string;
   };
+  /** 24/7 mode: the AI keeps answering even during handoffs or AI errors, unless a human is actively replying. */
+  alwaysOn: { enabled: boolean; humanGraceMinutes: number };
   ai: {
     chatModel: string; // empty = platform default
     thinkingLevel: "default" | "low" | "medium" | "high";
@@ -97,7 +101,9 @@ export const DEFAULT_SETTINGS: TenantSettings = {
     emojiLevel: "low",
     maxBubbles: 3,
     extraStyle: "",
+    goal: "Customer ရဲ့ လိုအပ်ချက်နဲ့ ကိုက်တဲ့ ပစ္စည်း/Course ကို ဝယ်ဖြစ်အောင် — Order အတွက် လိုအပ်တဲ့ အချက်အလက်ယူပြီး ငွေလွှဲ Screenshot ရတဲ့အထိ ပိတ်ပါ",
   },
+  alwaysOn: { enabled: true, humanGraceMinutes: 10 },
   ai: {
     chatModel: "",
     thinkingLevel: "low",
