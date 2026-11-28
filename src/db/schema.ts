@@ -138,6 +138,9 @@ export const products = pgTable("products", {
   price: integer("price").notNull().default(0),
   salePrice: integer("sale_price"),
   saleEndsAt: timestamp("sale_ends_at", { withTimezone: true }),
+  /** Courses: class start date and last day to enrol — drive the exact countdown Thiri tells customers. */
+  classStartAt: timestamp("class_start_at", { withTimezone: true }),
+  enrollDeadlineAt: timestamp("enroll_deadline_at", { withTimezone: true }),
   duration: text("duration").notNull().default(""),
   deliveryInfo: text("delivery_info").notNull().default(""),
   bonus: text("bonus").notNull().default(""),
@@ -194,6 +197,16 @@ export type CustomerProfile = {
   source?: string;
   /** Telegram Business connection used to reply to this customer. */
   bizConnectionId?: string;
+  /** Long-term facts Thiri remembers about this customer (older than the chat window). */
+  memory?: string[];
+  /** productId → Myanmar date (YYYY-MM-DD) the countdown was last told, so it isn't repeated the same day. */
+  countdownShown?: Record<string, string>;
+  /** Messenger said this person can't be reached (#551 — blocked/left/unavailable). Cleared when they write again. */
+  unreachableAt?: string;
+  unreachableError?: string;
+  deliveryRetries?: number;
+  /** Bought / enrolled — Thiri supports instead of selling. */
+  enrolledProductIds?: string[];
 };
 
 export const customers = pgTable(

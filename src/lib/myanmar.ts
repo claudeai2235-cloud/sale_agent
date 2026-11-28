@@ -22,3 +22,11 @@ export function formatMMK(n: number | null | undefined) {
   if (n == null) return "-";
   return `${n.toLocaleString("en-US")} ကျပ်`;
 }
+
+/**
+ * Adds the dot-below (့) to a polite particle in correct Unicode order:
+ * "ရှင်" → "ရှင့်" (U+1037 before U+103A), not "ရှင့််".
+ */
+export function withDot(particle: string) {
+  return particle.endsWith("်") ? `${particle.slice(0, -1)}့်` : `${particle}့`;
+}

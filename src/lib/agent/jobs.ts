@@ -1,3 +1,4 @@
+import { withDot } from "@/lib/myanmar";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { customers, faqs, lessons, messages, objections, orders, platformSettings, reports, tenants, type Customer, type Tenant } from "@/db/schema";
@@ -6,6 +7,7 @@ import { randomCode } from "@/lib/crypto";
 import { hours, inQuietHours, minutes, mmHour } from "@/lib/time";
 import { messengerWindowOpen, sendToCustomer } from "@/lib/channels/outbound";
 import { notifyAdmins, notifySuperAdmin } from "@/lib/notify";
+import { countdownFor } from "@/lib/countdown";
 import { generate, platformModels } from "./gemini";
 import { buildSystemPrompt, type Knowledge } from "./prompt";
 import { botPaused, historyContents, loadKnowledge, openOrderFor, paymentInfoText, processCustomer, tenantServing } from "./engine";
@@ -69,6 +71,7 @@ export async function sweepUnanswered(limit = 10) {
         gt(messages.createdAt, new Date(Date.now() - hours(24))),
         inArray(customers.channelType, ["telegram", "messenger"]),
         or(isNull(customers.processingUntil), lt(customers.processingUntil, new Date())),
+        sql`${customers.profile}->>'unreachableAt' is null`,
       ),
     )
     .limit(limit);
@@ -108,6 +111,8 @@ export async function runFollowups(limit = 15) {
         isNull(customers.followupStoppedAt),
         eq(customers.needsHuman, false),
         gt(customers.lastInboundAt, new Date(Date.now() - hours(24 * 7))),
+        sql`${customers.profile}->>'unreachableAt' is null`,
+        sql`coalesce(jsonb_array_length(${customers.profile}->'enrolledProductIds'), 0) = 0`,
       ),
     )
     .orderBy(customers.lastInboundAt)
@@ -145,12 +150,18 @@ async function sendFollowup(t: Tenant, c: Customer, goal: string, n: number, tot
   const s = resolveSettings(t.settings);
   const k: Knowledge = await loadKnowledge(t.id);
   const contents = await historyContents(c, 16, new Set());
+  // Real, code-computed class countdown for the course they were interested in.
+  const interested = c.profile.interestedProductIds ?? [];
+  const dated = k.products.filter((p) => p.classStartAt);
+  const course = dated.find((p) => interested.includes(p.id)) ?? (dated.length === 1 ? dated[0] : undefined);
+  const cd = course ? countdownFor(course, s.persona.politeParticle) : null;
+  const cdLine = cd && !cd.closed ? `\nReal class countdown (use this sentence word for word as the last bubble if it fits — don't change the numbers): "${cd.text}"` : "";
   contents.push({
     role: "user",
     parts: [
       {
         text: `[SYSTEM — not from the customer] The customer has not replied for a while. Write follow-up ${n} of ${total}. Goal: ${goal}.
-Rules: 1-2 very short bubbles, personal and specific to what they talked about (their need, the product they liked), not generic, not pushy, no guilt. Do not repeat previous messages. If following up would be inappropriate (they clearly declined, conversation was finished, they already bought, or they were upset), set send=false.`,
+Rules: 1-2 very short bubbles, personal and specific to what they talked about (their need, the product they liked), not generic, not pushy, no guilt. Do not repeat previous messages. If following up would be inappropriate (they clearly declined, conversation was finished, they already bought, or they were upset), set send=false.${cdLine}`,
       },
     ],
   });
@@ -192,6 +203,10 @@ export async function runPaymentReminders(limit = 20) {
     if (sent >= limit) break;
     const t = await tenantOf(o.tenantId);
     if (!t || !(await tenantServing(t)) || botPaused(c)) continue;
+    if (c.profile.unreachableAt) {
+      await db.update(orders).set({ paymentReminderSent: true }).where(eq(orders.id, o.id));
+      continue;
+    }
     const s = resolveSettings(t.settings);
     if (!s.followup.enabled || Date.now() - new Date(o.createdAt).getTime() < minutes(s.followup.paymentReminderMinutes)) continue;
     if (inQuietHours(s.followup.quietStartHour, s.followup.quietEndHour)) continue;
@@ -203,7 +218,7 @@ export async function runPaymentReminders(limit = 20) {
     const k = await loadKnowledge(t.id);
     const res = await sendToCustomer(
       c,
-      [`Order #${o.code} လေးအတွက် ငွေလွှဲပြီးပြီဆိုရင် Screenshot လေး ပို့ပေးပါနော်${p}့။ ငွေလွှဲရာမှာ အခက်အခဲရှိရင်လည်း ပြောပါ${p}၊ ကူညီပေးပါမယ်။`, paymentInfoText(s, k, o).split("\n\n" + s.order.afterOrderMessage)[0]],
+      [`Order #${o.code} လေးအတွက် ငွေလွှဲပြီးပြီဆိုရင် Screenshot လေး ပို့ပေးပါနော်${withDot(p)}။ ငွေလွှဲရာမှာ အခက်အခဲရှိရင်လည်း ပြောပါ${p}၊ ကူညီပေးပါမယ်။`, paymentInfoText(s, k, o).split("\n\n" + s.order.afterOrderMessage)[0]],
       { sender: "bot", meta: { paymentReminder: true } },
     );
     await db.update(orders).set({ paymentReminderSent: true }).where(eq(orders.id, o.id));

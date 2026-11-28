@@ -21,12 +21,13 @@ import {
   type OrderItem,
   type Tenant,
 } from "@/db/schema";
-import { toUnicode } from "@/lib/myanmar";
+import { toUnicode, withDot } from "@/lib/myanmar";
 import { resolveSettings, type HandoffTrigger, type TenantSettings } from "@/lib/settings";
 import { minutes, sleep } from "@/lib/time";
 import { randomCode } from "@/lib/crypto";
 import { getChannel, messengerFor, sendToCustomer, telegramFor } from "@/lib/channels/outbound";
 import { notifyAdmins, signedMediaUrl } from "@/lib/notify";
+import { countdownFor, mmDateKey } from "@/lib/countdown";
 import { generate, platformModels } from "./gemini";
 import { buildSystemPrompt, effectivePrice, REPLY_SCHEMA, type AgentReply, type Knowledge } from "./prompt";
 
@@ -74,6 +75,8 @@ export async function ingestInbound(m: Inbound): Promise<{ customer: Customer; m
         lastInboundAt: sql`greatest(${customers.lastInboundAt}, ${at.toISOString()}::timestamptz)`,
         unanswered: true,
         followupStep: 0,
+        // A new message means they can receive replies again (Messenger #551 etc. is usually temporary).
+        profile: sql`${customers.profile} - 'unreachableAt' - 'deliveryRetries'`,
         updatedAt: new Date(),
         ...(m.displayName ? { displayName: m.displayName } : {}),
         ...(m.channel ? { channelId: m.channel.id } : {}),
@@ -350,7 +353,7 @@ async function sendHoldingMessage(s: TenantSettings, customer: Customer) {
     .limit(1);
   if (recent) return;
   const p = s.persona.politeParticle;
-  await sendToCustomer(customer, [`ခဏလေးနော်${p}၊ သေချာစစ်ပြီး ချက်ချင်း ပြန်ဖြေပေးပါမယ်${p}့။`], { sender: "bot", meta: { holding: true } });
+  await sendToCustomer(customer, [`ခဏလေးနော်${p}၊ သေချာစစ်ပြီး ချက်ချင်း ပြန်ဖြေပေးပါမယ်${withDot(p)}။`], { sender: "bot", meta: { holding: true } });
 }
 
 const trig = (s: TenantSettings, t: HandoffTrigger) => s.handoff.enabled && s.handoff.triggers[t];
@@ -365,8 +368,8 @@ export async function applyReply(
   pending: Message[],
   ctx: { duringHandoff?: boolean } = {},
 ) {
-  // 1) Customer data & stage
-  await updateCustomerFromReply(customer, r);
+  // 1) Customer data, memory & stage
+  await updateCustomerFromReply(customer, knowledge, r);
 
   // 2) Knowledge gap → learning queue
   if (r.knowledge_gap?.trim() && s.learning.enabled) {
@@ -382,13 +385,15 @@ export async function applyReply(
   // 4) Orders
   const extra: string[] = [];
   let order = openOrder;
+  let orderCreated = false;
   if (r.order?.action === "create" || (r.order?.action === "update" && !openOrder)) {
     const res = await createOrder(tenant, s, customer, knowledge, r);
     if (res.order) {
       order = res.order;
+      orderCreated = true;
       extra.push(paymentInfoText(s, knowledge, res.order));
     } else if (res.missing?.length) {
-      extra.push(`Order တင်ဖို့ ${res.missing.join("၊ ")} လေး ပေးပါဦးနော်${s.persona.politeParticle}့။`);
+      extra.push(`Order တင်ဖို့ ${res.missing.join("၊ ")} လေး ပေးပါဦးနော်${withDot(s.persona.politeParticle)}။`);
     }
   } else if (r.order?.action === "update" && openOrder) {
     order = await updateOrder(openOrder, knowledge, r);
@@ -423,10 +428,51 @@ export async function applyReply(
     .map((id) => knowledge.products.find((p) => p.id === id)?.imageUrl)
     .filter((u): u is string => !!u)
     .slice(0, 3);
-  const bubbles = [...(r.reply ?? []).slice(0, s.persona.maxBubbles), ...extra];
+  // Exact class-start countdown (FOMO), once per day per course, only for customers who haven't bought.
+  const cd = orderCreated ? null : pickCountdown(s, fresh, knowledge, r);
+  const bubbles = [...(r.reply ?? []).slice(0, s.persona.maxBubbles), ...extra, ...(cd ? [cd.text] : [])];
   const sent = await sendToCustomer(fresh, bubbles, { sender: "bot", images });
-  // Keep the conversation flagged as unanswered if delivery failed, so a human sees it in the inbox.
-  if (sent.ok) await db.update(customers).set({ unanswered: false }).where(eq(customers.id, customer.id));
+  if (sent.ok) {
+    await db
+      .update(customers)
+      .set({
+        unanswered: false,
+        profile: sql`(${customers.profile} - 'deliveryRetries')${cd ? sql` || ${JSON.stringify({ countdownShown: { ...(fresh.profile.countdownShown ?? {}), [cd.productId]: cd.day } })}::jsonb` : sql``}`,
+      })
+      .where(eq(customers.id, customer.id));
+  } else if (sent.retryable && sent.sent === 0) {
+    // Temporary delivery failure: put the messages back so the sweeper answers them again (max 3 times).
+    const tries = (fresh.profile.deliveryRetries ?? 0) + 1;
+    await db
+      .update(customers)
+      .set({ profile: sql`${customers.profile} || ${JSON.stringify({ deliveryRetries: tries })}::jsonb` })
+      .where(eq(customers.id, customer.id));
+    if (tries <= 3) await db.update(messages).set({ handled: false }).where(inArray(messages.id, pending.map((m) => m.id)));
+  }
+  // On failure the conversation stays flagged "unanswered", so a human sees it in the inbox.
+}
+
+const COURSE_INTENTS = new Set(["product_question", "price", "objection", "buying", "order_details"]);
+
+export function isEnrolled(c: Customer) {
+  return c.stage === "paid" || (c.profile.enrolledProductIds?.length ?? 0) > 0;
+}
+
+function pickCountdown(s: TenantSettings, c: Customer, k: Knowledge, r: AgentReply) {
+  if (isEnrolled(c)) return null;
+  const dated = k.products.filter((p) => p.classStartAt && countdownFor(p) && !countdownFor(p)!.closed);
+  if (!dated.length) return null;
+  let product = r.countdown_product_id ? dated.find((p) => p.id === r.countdown_product_id) : undefined;
+  if (!product && COURSE_INTENTS.has(r.intent ?? "")) {
+    // The model forgot — fall back to the course they're interested in (or the only dated course).
+    const interested = [...(r.customer?.interested_product_ids ?? []), ...(c.profile.interestedProductIds ?? [])];
+    product = dated.find((p) => interested.includes(p.id)) ?? (dated.length === 1 ? dated[0] : undefined);
+  }
+  if (!product) return null;
+  const day = mmDateKey(new Date());
+  if (c.profile.countdownShown?.[product.id] === day) return null;
+  const cd = countdownFor(product, s.persona.politeParticle);
+  return cd && !cd.closed ? { productId: product.id, day, text: cd.text } : null;
 }
 
 function uniqMerge(a: string[] | undefined, b: string[] | undefined, max = 12) {
@@ -438,8 +484,23 @@ function uniqMerge(a: string[] | undefined, b: string[] | undefined, max = 12) {
   return [...set.values()].slice(-max);
 }
 
-async function updateCustomerFromReply(customer: Customer, r: AgentReply) {
+async function updateCustomerFromReply(customer: Customer, knowledge: Knowledge, r: AgentReply) {
   const c = r.customer ?? {};
+  // Enrolment is accepted from the AI only when a human admin actually wrote in this chat (e.g. sent the course link).
+  let enrolled = customer.profile.enrolledProductIds;
+  let confirmedByAdmin = false;
+  if (r.admin_confirmed_purchase) {
+    const [human] = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.customerId, customer.id), eq(messages.sender, "human")))
+      .limit(1);
+    if (human) {
+      confirmedByAdmin = true;
+      const valid = (r.enrolled_product_ids ?? []).filter((id) => knowledge.products.some((p) => p.id === id));
+      enrolled = uniqMerge(enrolled, valid.length ? valid : (customer.profile.interestedProductIds ?? []).slice(-1), 20);
+    }
+  }
   const profile: CustomerProfile = {
     ...customer.profile,
     needs: uniqMerge(customer.profile.needs, c.needs),
@@ -451,6 +512,8 @@ async function updateCustomerFromReply(customer: Customer, r: AgentReply) {
     ...(c.address ? { address: c.address } : {}),
     ...(c.notes ? { notes: c.notes } : {}),
     ...(c.lost_reason ? { lostReason: c.lost_reason } : {}),
+    memory: uniqMerge(customer.profile.memory, (r.memory_notes ?? []).map((x) => x.slice(0, 200)), 25),
+    ...(enrolled?.length ? { enrolledProductIds: enrolled } : {}),
   };
   // Never move a paid/ordered customer backwards because of a casual message.
   const rank = { new: 0, interested: 1, considering: 2, ready: 3, ordered: 4, paid: 5, lost: 1 } as const;
@@ -458,6 +521,7 @@ async function updateCustomerFromReply(customer: Customer, r: AgentReply) {
   // "ordered" and "paid" are set only by the system (order creation / admin confirmation), never by the model.
   if (r.stage === "paid" || r.stage === "ordered") r = { ...r, stage: customer.stage };
   if (r.stage && (r.stage === "lost" ? customer.stage !== "paid" : rank[r.stage] >= rank[customer.stage] || customer.stage === "lost")) stage = r.stage;
+  if (confirmedByAdmin) stage = "paid";
   await db
     .update(customers)
     .set({
@@ -658,7 +722,13 @@ export async function resumeBot(customerId: string) {
 export async function confirmOrder(orderId: string) {
   const [o] = await db.update(orders).set({ status: "confirmed", updatedAt: new Date() }).where(eq(orders.id, orderId)).returning();
   if (!o) return null;
-  const [customer] = await db.update(customers).set({ stage: "paid", updatedAt: new Date() }).where(eq(customers.id, o.customerId)).returning();
+  const [prev] = await db.select().from(customers).where(eq(customers.id, o.customerId)).limit(1);
+  const enrolledProductIds = uniqMerge(prev?.profile.enrolledProductIds, o.items.map((i) => i.productId), 20);
+  const [customer] = await db
+    .update(customers)
+    .set({ stage: "paid", profile: { ...(prev?.profile ?? {}), enrolledProductIds }, updatedAt: new Date() })
+    .where(eq(customers.id, o.customerId))
+    .returning();
   const [tenant] = await db.select().from(tenants).where(eq(tenants.id, o.tenantId)).limit(1);
   const s = resolveSettings(tenant.settings);
   if (s.order.confirmedMessage.trim()) await sendToCustomer(customer, [s.order.confirmedMessage], { sender: "bot", humanAgentTag: s.messenger.humanAgentTag });

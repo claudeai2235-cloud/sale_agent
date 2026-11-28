@@ -4,12 +4,15 @@ import { products, type Product } from "@/db/schema";
 import { requireTenant } from "@/lib/auth";
 import { formatMMK } from "@/lib/myanmar";
 import { effectivePrice } from "@/lib/agent/prompt";
+import { countdownFor, mmDateKey, mmDateText } from "@/lib/countdown";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Card, Empty, Field, Input, PageHeader, Select, Textarea, Toggle } from "@/components/ui";
 import { deleteProduct, saveProduct } from "../actions";
 
 function ProductForm({ tenantId, p }: { tenantId: string; p?: Product }) {
-  const d = p?.saleEndsAt ? new Date(new Date(p.saleEndsAt).getTime() + 6.5 * 3600_000).toISOString().slice(0, 10) : "";
+  const d = p?.saleEndsAt ? mmDateKey(new Date(p.saleEndsAt)) : "";
+  const cs = p?.classStartAt ? mmDateKey(new Date(p.classStartAt)) : "";
+  const ed = p?.enrollDeadlineAt ? mmDateKey(new Date(p.enrollDeadlineAt)) : "";
   return (
     <ActionForm action={saveProduct} resetOnSuccess={!p}>
       <input type="hidden" name="tenantId" value={tenantId} />
@@ -56,6 +59,14 @@ function ProductForm({ tenantId, p }: { tenantId: string; p?: Product }) {
           <Input name="stock" type="number" min={0} defaultValue={p?.stock ?? ""} />
         </Field>
       </div>
+      <div className="grid gap-4 rounded-lg border border-dashed border-line p-3 md:grid-cols-2">
+        <Field label="📅 အတန်းစမည့်ရက်" hint="ထည့်ထားရင် မဝယ်ရသေးတဲ့ Customer ကို ‘အတန်းစဖို့ … ရက်သာ ကျန်ပါတော့တယ်’ လို့ နေ့တိုင်း အတိအကျ ရေတွက်ပြီး ပြောပေးမယ်">
+          <Input name="classStartAt" type="date" defaultValue={cs} />
+        </Field>
+        <Field label="⏳ နောက်ဆုံး အပ်နှံရက်" hint="မထည့်ရင် အတန်းစရက်အထိ လက်ခံ။ ကျော်သွားရင် Thiri က ‘ဒီအသုတ် ပိတ်ပါပြီ’ လို့ ရိုးရိုးသားသား ပြောမယ်">
+          <Input name="enrollDeadlineAt" type="date" defaultValue={ed} />
+        </Field>
+      </div>
       <div className="grid gap-4 md:grid-cols-3">
         <Field label="ကြာချိန်">
           <Input name="duration" defaultValue={p?.duration} placeholder="၇ ရက် (တစ်နေ့ ၃၀ မိနစ်)" />
@@ -83,6 +94,18 @@ function ProductForm({ tenantId, p }: { tenantId: string; p?: Product }) {
   );
 }
 
+function ClassInfo({ p }: { p: Product }) {
+  if (!p.classStartAt) return null;
+  const cd = countdownFor(p);
+  if (!cd) return <p className="mt-1 text-xs text-muted">📅 {mmDateText(new Date(p.classStartAt))} က အတန်းစပြီးပါပြီ — အသုတ်သစ်ရက် ပြင်ထည့်ပါ</p>;
+  if (cd.closed) return <p className="mt-1 text-xs text-red-600">⛔ စာရင်းပိတ်ပြီ (အတန်းစ {mmDateText(new Date(p.classStartAt))})</p>;
+  return (
+    <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+      ⏳ ဒီနေ့ Customer ကို ပြောမယ့်စာ: “{cd.text}”
+    </p>
+  );
+}
+
 export default async function ProductsPage({ params }: PageProps<"/t/[tenantId]/products">) {
   const { tenantId } = await params;
   await requireTenant(tenantId);
@@ -107,6 +130,7 @@ export default async function ProductsPage({ params }: PageProps<"/t/[tenantId]/
                   {p.name} {!p.active && <Badge tone="gray">ပိတ်ထား</Badge>} {ep.onSale && <Badge tone="purple">Promotion</Badge>}
                 </div>
                 <p className="text-sm text-muted">{p.summary}</p>
+                <ClassInfo p={p} />
               </div>
               <div className="text-right">
                 <div className="font-semibold">{formatMMK(ep.price)}</div>

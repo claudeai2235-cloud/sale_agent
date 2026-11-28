@@ -1,3 +1,4 @@
+import { withDot } from "@/lib/myanmar";
 import { and, desc, eq } from "drizzle-orm";
 import type { Part } from "@google/genai";
 import { db } from "@/db";
@@ -252,7 +253,7 @@ Write in Burmese (technical terms may stay in English).`;
       fallbackModel: models.lite,
       purpose: "autofill-structure",
       system: `You convert a consulting brief into data for an AI sales assistant's knowledge base. Write all values in natural, concise Burmese (Unicode) suitable to be said to customers; English product terms are fine.
-The assistant is a woman named ${s0.persona.name}: customer-facing text (FAQ answers, objection responses) must use the female polite particle "${s0.persona.politeParticle}" / "${s0.persona.politeParticle}့" — never "ခင်ဗျာ" or "ခင်ဗျ".
+The assistant is a woman named ${s0.persona.name}: customer-facing text (FAQ answers, objection responses) must use the female polite particle "${s0.persona.politeParticle}" / "${withDot(s0.persona.politeParticle)}" — never "ခင်ဗျာ" or "ခင်ဗျ".
 Allowed profile keys (use exactly these keys):
 ${allowed}
 Rules:

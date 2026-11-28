@@ -131,6 +131,16 @@ export default async function InboxPage({ params, searchParams }: PageProps<"/t/
                     {botPaused(detail.c) ? <Badge tone="amber">Bot ရပ်ထား ({fmt(detail.c.botPausedUntil)} အထိ)</Badge> : <Badge tone="green">Thiri ဖြေနေ</Badge>}
                   </div>
                   {detail.c.handoffReason && <div className="text-xs text-red-600">လွှဲရခြင်း: {detail.c.handoffReason}</div>}
+                  {(detail.c.profile.enrolledProductIds?.length ?? 0) > 0 && (
+                    <div className="text-xs text-green-700">
+                      🎓 သင်တန်းသား: {detail.c.profile.enrolledProductIds!.map((id) => detail.ps.find((p) => p.id === id)?.name ?? "").filter(Boolean).join("၊ ") || "✓"} — Thiri က ထပ်မရောင်းဘဲ Support ပဲ ပေးပါမယ်
+                    </div>
+                  )}
+                  {detail.c.profile.unreachableAt && (
+                    <div className="text-xs text-amber-700">
+                      ⚠️ ဒီ Customer ဆီ စာပို့မရဖြစ်နေ ({fmt(detail.c.profile.unreachableAt)}) — Page ကို Block ထား / Account ပိတ် / Meta App Live မဖြစ်သေးလို့ ဖြစ်နိုင်။ သူ စာပြန်ပို့တာနဲ့ အလိုအလျောက် ပြန်ဖြေပါမယ်။
+                    </div>
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {(
@@ -139,6 +149,7 @@ export default async function InboxPage({ params, searchParams }: PageProps<"/t/
                       botPaused(detail.c) ? ["resume", "Bot ပြန်ဖွင့်"] : ["pause", "Bot ရပ်မည်"],
                       ["done", "✓ ပြီးပြီ"],
                       ["stopFollowup", "Follow-up မလိုက်တော့"],
+                      (detail.c.profile.enrolledProductIds?.length ?? 0) > 0 ? ["unenroll", "🎓 သင်တန်းသား ဖြုတ်"] : ["enrolled", "🎓 သင်တန်းသား (ဝယ်ပြီး)"],
                     ] as const
                   ).map(([op, label]) => (
                     <form key={op} action={botControlAction}>
@@ -178,6 +189,18 @@ export default async function InboxPage({ params, searchParams }: PageProps<"/t/
                       <dd>{v?.filter(Boolean).join("၊ ") || "-"}</dd>
                     </div>
                   ))}
+                  {(detail.c.profile.memory?.length ?? 0) > 0 && (
+                    <div>
+                      <dt className="text-xs text-muted">မှတ်ထားတာ (Chat တိုင်းက)</dt>
+                      <dd>
+                        <ul className="list-disc space-y-0.5 pl-4">
+                          {detail.c.profile.memory!.slice(-12).map((m, i) => (
+                            <li key={i}>{m}</li>
+                          ))}
+                        </ul>
+                      </dd>
+                    </div>
+                  )}
                   {detail.c.profile.budget && (
                     <div>
                       <dt className="text-xs text-muted">Budget</dt>

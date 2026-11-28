@@ -77,6 +77,9 @@ export async function saveProduct(_: ActionResult, fd: FormData) {
   const name = str(fd, "name");
   if (!name) return fail("အမည် ထည့်ပါ");
   const saleEnds = str(fd, "saleEndsAt");
+  const classStart = str(fd, "classStartAt");
+  const enrollDeadline = str(fd, "enrollDeadlineAt");
+  if (classStart && enrollDeadline && enrollDeadline > classStart) return fail("နောက်ဆုံးအပ်နှံရက်က အတန်းစရက်ထက် နောက်ကျလို့ မရပါ");
   const values = {
     kind: (str(fd, "kind") || "product") as "course" | "product" | "service",
     name,
@@ -87,6 +90,9 @@ export async function saveProduct(_: ActionResult, fd: FormData) {
     price: num(fd, "price"),
     salePrice: str(fd, "salePrice") ? num(fd, "salePrice") : null,
     saleEndsAt: saleEnds ? new Date(`${saleEnds}T23:59:59+06:30`) : null,
+    // Dates are Myanmar calendar days; the countdown is counted in Asia/Yangon.
+    classStartAt: classStart ? new Date(`${classStart}T09:00:00+06:30`) : null,
+    enrollDeadlineAt: enrollDeadline ? new Date(`${enrollDeadline}T23:59:59+06:30`) : null,
     duration: str(fd, "duration"),
     deliveryInfo: str(fd, "deliveryInfo"),
     bonus: str(fd, "bonus"),
@@ -479,6 +485,25 @@ export async function botControlAction(fd: FormData) {
   }
   if (op === "stopFollowup") await db.update(customers).set({ followupStoppedAt: new Date() }).where(eq(customers.id, c.id));
   if (op === "done") await db.update(customers).set({ unanswered: false, needsHuman: false }).where(eq(customers.id, c.id));
+  if (op === "enrolled" || op === "unenroll") {
+    // Admin marks a customer as an enrolled student → Thiri stops selling and switches to support.
+    const pid = str(fd, "productId");
+    const ids = new Set(c.profile.enrolledProductIds ?? []);
+    if (op === "enrolled") {
+      if (pid) ids.add(pid);
+      else for (const x of c.profile.interestedProductIds ?? []) ids.add(x);
+    } else ids.clear();
+    await db
+      .update(customers)
+      .set({
+        stage: op === "enrolled" ? "paid" : "interested",
+        needsHuman: false,
+        followupStoppedAt: op === "enrolled" ? new Date() : c.followupStoppedAt,
+        profile: { ...c.profile, enrolledProductIds: [...ids] },
+        updatedAt: new Date(),
+      })
+      .where(eq(customers.id, c.id));
+  }
   const stage = str(fd, "stage");
   if (op === "stage" && stage) await db.update(customers).set({ stage: stage as "new" }).where(eq(customers.id, c.id));
   rp(tenant, "/inbox");

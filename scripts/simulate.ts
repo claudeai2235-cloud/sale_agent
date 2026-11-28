@@ -11,7 +11,14 @@ import { ensurePlatformRow } from "../src/lib/agent/jobs";
 
 async function seed() {
   const [existing] = await db.select().from(tenants).where(eq(tenants.slug, "demo-ai-course")).limit(1);
-  if (existing) return existing;
+  if (existing) {
+    // Demo class batch: starts 6 Dec (Myanmar time), enrolment closes 4 Dec.
+    await db
+      .update(products)
+      .set({ classStartAt: new Date("2026-12-06T09:00:00+06:30"), enrollDeadlineAt: new Date("2026-12-04T23:59:59+06:30") })
+      .where(eq(products.tenantId, existing.id));
+    return existing;
+  }
   const [t] = await db
     .insert(tenants)
     .values({
@@ -63,6 +70,13 @@ async function main() {
   if (reset) await db.delete(customers).where(eq(customers.externalId, "sim-user"));
   const msgs = process.argv.slice(2).filter((a) => a !== "--reset");
   for (const text of msgs) {
+    if (text.startsWith("@admin:")) {
+      // Simulates the business admin replying by hand (e.g. sending the course link).
+      const [c] = await db.select().from(customers).where(eq(customers.externalId, "sim-user"));
+      await db.insert(messages).values({ tenantId: t.id, customerId: c.id, direction: "out", sender: "human", text: text.slice(7).trim(), handled: true });
+      console.log(`\n🧑‍💼 ADMIN: ${text.slice(7).trim()}`);
+      continue;
+    }
     console.log(`\n👤 ${text}`);
     const r = await ingestInbound({ tenant: t, channel: null, channelType: "test", externalUserId: "sim-user", displayName: "Ma Su", text });
     if (!r) continue;
@@ -73,7 +87,7 @@ async function main() {
     const fresh = out.filter((m) => m.direction === "out" && !before.has(m.id));
     for (const m of fresh) console.log(`🤖 ${m.text}`);
     const [c] = await db.select().from(customers).where(eq(customers.id, r.customer.id));
-    console.log(`   [stage=${c.stage} handoff=${c.handoffReason ?? "-"} needs=${(c.profile.needs ?? []).join("|")} pains=${(c.profile.painPoints ?? []).join("|")}] (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+    console.log(`   [stage=${c.stage} handoff=${c.handoffReason ?? "-"} needs=${(c.profile.needs ?? []).join("|")} pains=${(c.profile.painPoints ?? []).join("|")} enrolled=${(c.profile.enrolledProductIds ?? []).length} memory=${JSON.stringify(c.profile.memory ?? [])}] (${((Date.now() - started) / 1000).toFixed(1)}s)`);
   }
   const os = await db.select().from(orders).where(eq(orders.tenantId, t.id));
   if (os.length) console.log("\nORDERS:", os.map((o) => `#${o.code} ${o.total} ${o.status} ${JSON.stringify(o.fields)}`).join("\n"));
